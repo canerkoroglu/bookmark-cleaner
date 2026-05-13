@@ -1,0 +1,14 @@
+{
+  "domain": {
+    "github.com": "developer",
+    "stackoverflow.com": "developer",
+    "youtube.com": "video",
+    "amazon.com": "shopping"
+  },
+  "contains": {
+    "/docs": "docs",
+    "/reference": "reference",
+    "news": "news"
+  }
+}
+

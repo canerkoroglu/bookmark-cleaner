@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -d /opt/homebrew/opt/expat/lib ]]; then
+  export DYLD_LIBRARY_PATH="/opt/homebrew/opt/expat/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+fi
+
+PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
+
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  cat >&2 <<EOF
+Missing virtual environment at ${ROOT_DIR}/.venv.
+
+Run:
+  ./scripts/setup_venv.sh
+
+Then retry:
+  ./bookmarks --input bookmark.json --output result.csv
+EOF
+  exit 1
+fi
+
+exec "${PYTHON_BIN}" "${ROOT_DIR}/main.py" "$@"
