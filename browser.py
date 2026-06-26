@@ -31,7 +31,7 @@ class BrowserResult:
 class BrowserValidator:
     def __init__(
         self,
-        timeout_ms: int = 15_000,
+        timeout_ms: int = 10_000,
         user_agent: str = DEFAULT_USER_AGENT,
         retry_attempts: int = 2,
         retry_backoff_seconds: float = 0.7,
@@ -106,7 +106,25 @@ class BrowserValidator:
         page = await self._context.new_page()
         try:
             await self._wait_for_domain_slot(url)
-            response = await page.goto(url, wait_until="networkidle", timeout=self.timeout_ms)
+            try:
+                response = await page.goto(url, wait_until="networkidle", timeout=self.timeout_ms)
+            except TimeoutError as exc:
+                # networkidle can hang on sites that stream or keep connections open.
+                # Try a faster fallback to domcontentloaded with a shorter timeout.
+                LOGGER.debug("networkidle timeout for %s, trying domcontentloaded fallback", url)
+                try:
+                    fallback_timeout = min(5000, max(2000, int(self.timeout_ms // 2)))
+                    response = await page.goto(url, wait_until="domcontentloaded", timeout=fallback_timeout)
+                except TimeoutError as exc2:
+                    # Both attempts timed out — report original timeout
+                    return BrowserResult(
+                        ok=False,
+                        http_status=None,
+                        title="",
+                        description="",
+                        keywords="",
+                        error=f"Timeout after {self.timeout_ms}ms (networkidle then domcontentloaded): {exc2}",
+                    )
             http_status = response.status if response is not None else None
             title = (await page.title()).strip()
             description = await _meta_content(page, "description")

@@ -82,8 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--timeout-ms",
         type=int,
-        default=_env_int("BA_BROWSER_TIMEOUT_MS", 15_000),
-        help="Playwright navigation timeout. Defaults to BA_BROWSER_TIMEOUT_MS or 15000.",
+        default=_env_int("BA_BROWSER_TIMEOUT_MS", 10_000),
+        help="Playwright navigation timeout in milliseconds. Defaults to BA_BROWSER_TIMEOUT_MS or 10000.",
     )
     parser.add_argument(
         "--request-timeout-seconds",
