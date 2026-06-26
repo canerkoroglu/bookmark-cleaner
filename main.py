@@ -5,11 +5,12 @@ import asyncio
 import logging
 import os
 import signal
+import json
 from pathlib import Path
 
 from db import JobQueue
 from env_loader import load_env_file
-from exporter import export_jobs_to_csv
+from exporter import export_jobs_to_csv, CsvIncrementalExporter
 from parser import extract_urls_from_firefox_json
 
 
@@ -133,6 +134,20 @@ async def async_main() -> int:
         raise SystemExit("--input is required unless you use --ai-only")
     if args.ai_only and args.reset:
         raise SystemExit("--ai-only cannot be used with --reset")
+    if not args.ai_only:
+        # args.input is required above; validate the path exists and is a file
+        assert args.input is not None
+        if not args.input.exists() or not args.input.is_file():
+            parent = args.input.parent
+            if parent.exists():
+                files = sorted([p.name for p in parent.iterdir() if p.is_file()])
+                raise SystemExit(
+                    f"Input file {args.input} not found. Files in {parent}: {', '.join(files) or '<no files>'}"
+                )
+            else:
+                raise SystemExit(
+                    f"Input file {args.input} not found and directory {parent} does not exist."
+                )
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -164,7 +179,12 @@ async def async_main() -> int:
         run_limit = args.limit
         if not args.ai_only:
             assert args.input is not None
-            urls = extract_urls_from_firefox_json(args.input)
+            try:
+                urls = extract_urls_from_firefox_json(args.input)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise SystemExit(f"Failed to parse JSON from {args.input}: {exc}") from exc
+            except OSError as exc:
+                raise SystemExit(f"Failed to read {args.input}: {exc}") from exc
             urls_to_insert = urls[: args.limit] if args.limit is not None else urls
             inserted = queue.insert_urls(urls_to_insert)
             LOGGER.info(
@@ -205,6 +225,9 @@ async def async_main() -> int:
             ai_client.request_interval_seconds,
         )
         if not args.ai_only:
+            # Create incremental CSV snapshot writer so rows are appended as jobs finish.
+            csv_exporter = CsvIncrementalExporter(args.output)
+
             LOGGER.info("Phase 1/2: deterministic browser/status/metadata checks")
             async with BrowserValidator(
                 timeout_ms=args.timeout_ms,
@@ -220,8 +243,10 @@ async def async_main() -> int:
                     limit=run_limit,
                     db_lock=db_lock,
                     stop_event=stop_event,
+                    csv_exporter=csv_exporter,
                 )
 
+            # Final deterministic snapshot (overwrite) to ensure canonical CSV before AI phase
             export_jobs_to_csv(queue, args.output)
             LOGGER.info("Exported deterministic CSV to %s", args.output)
 

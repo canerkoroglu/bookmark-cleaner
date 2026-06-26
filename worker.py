@@ -20,6 +20,7 @@ async def run_browser_workers(
     limit: int | None,
     db_lock: asyncio.Lock,
     stop_event: asyncio.Event,
+    csv_exporter = None,
 ) -> None:
     processed_this_run = 0
     processed_lock = asyncio.Lock()
@@ -56,6 +57,16 @@ async def run_browser_workers(
                         keywords=result.keywords,
                     )
                 LOGGER.info("worker=%s done job_id=%s", worker_id, job.id)
+                # Append incremental CSV snapshot (async-safe)
+                if csv_exporter is not None:
+                    await csv_exporter.append_row(
+                        site_url=job.url,
+                        status="done",
+                        title=result.title,
+                        description=result.description,
+                        keywords=result.keywords,
+                        comments="",
+                    )
                 continue
 
             async with db_lock:
@@ -69,6 +80,15 @@ async def run_browser_workers(
                     comments="Unknown purpose",
                 )
             LOGGER.warning("worker=%s failed job_id=%s error=%s", worker_id, job.id, result.error)
+            if csv_exporter is not None:
+                await csv_exporter.append_row(
+                    site_url=job.url,
+                    status="failed",
+                    title=result.title,
+                    description=result.description,
+                    keywords=result.keywords,
+                    comments=result.error or "",
+                )
 
     tasks = [asyncio.create_task(worker(i + 1)) for i in range(max(1, concurrency))]
     await asyncio.gather(*tasks)
