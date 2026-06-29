@@ -33,11 +33,45 @@ class JobQueue:
         self.conn.close()
 
     def init_schema(self) -> None:
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'"
+        ).fetchone()
+        schema_sql = row["sql"] if row is not None else None
+        if schema_sql and "url TEXT UNIQUE NOT NULL" in schema_sql:
+            self._migrate_jobs_table()
+        else:
+            self.conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id INTEGER PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('pending', 'processing', 'done', 'failed')),
+                    retries INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    http_status INTEGER,
+                    title TEXT,
+                    description TEXT,
+                    keywords TEXT,
+                    comments TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
         self.conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS jobs (
+            CREATE INDEX IF NOT EXISTS idx_jobs_status_retries_id
+            ON jobs(status, retries, id)
+            """
+        )
+
+    def _migrate_jobs_table(self) -> None:
+        self.conn.execute("ALTER TABLE jobs RENAME TO jobs_old")
+        self.conn.execute(
+            """
+            CREATE TABLE jobs (
                 id INTEGER PRIMARY KEY,
-                url TEXT UNIQUE NOT NULL,
+                url TEXT NOT NULL,
                 status TEXT NOT NULL CHECK(status IN ('pending', 'processing', 'done', 'failed')),
                 retries INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT,
@@ -53,10 +87,18 @@ class JobQueue:
         )
         self.conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_jobs_status_retries_id
-            ON jobs(status, retries, id)
+            INSERT INTO jobs (
+                id, url, status, retries, last_error, http_status,
+                title, description, keywords, comments, created_at, updated_at
+            )
+            SELECT
+                id, url, status, retries, last_error, http_status,
+                title, description, keywords, comments, created_at, updated_at
+            FROM jobs_old
+            ORDER BY id
             """
         )
+        self.conn.execute("DROP TABLE jobs_old")
 
     def reset(self) -> None:
         self.conn.execute("DELETE FROM jobs")
@@ -77,7 +119,7 @@ class JobQueue:
         before = self.conn.total_changes
         self.conn.executemany(
             """
-            INSERT OR IGNORE INTO jobs (url, status)
+            INSERT INTO jobs (url, status)
             VALUES (?, 'pending')
             """,
             [(url,) for url in urls],

@@ -185,6 +185,7 @@ async def async_main() -> int:
                 raise SystemExit(f"Failed to parse JSON from {args.input}: {exc}") from exc
             except OSError as exc:
                 raise SystemExit(f"Failed to read {args.input}: {exc}") from exc
+            LOGGER.info("Found %s URL(s) in %s", len(urls), args.input)
             urls_to_insert = urls[: args.limit] if args.limit is not None else urls
             inserted = queue.insert_urls(urls_to_insert)
             LOGGER.info(

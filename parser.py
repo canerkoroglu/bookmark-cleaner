@@ -14,16 +14,13 @@ def _is_http_url(value: str) -> bool:
 def extract_urls_from_firefox_json(path: Path) -> list[str]:
     data = json.loads(path.read_text(encoding="utf-8"))
     urls: list[str] = []
-    seen: set[str] = set()
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
             candidate = node.get("uri") or node.get("url")
             if isinstance(candidate, str) and _is_http_url(candidate):
                 url = candidate.strip()
-                if url not in seen:
-                    seen.add(url)
-                    urls.append(url)
+                urls.append(url)
 
             for value in node.values():
                 if isinstance(value, (dict, list)):
@@ -37,9 +34,7 @@ def extract_urls_from_firefox_json(path: Path) -> list[str]:
 
         if isinstance(node, str) and _is_http_url(node):
             url = node.strip()
-            if url not in seen:
-                seen.add(url)
-                urls.append(url)
+            urls.append(url)
 
     walk(data)
     return urls
