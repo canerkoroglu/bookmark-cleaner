@@ -232,6 +232,9 @@ class JobQueue:
         ).fetchall()
         return {row["status"]: int(row["total"]) for row in rows}
 
+    def fetch_failed_rows(self) -> list[sqlite3.Row]:
+        return list(self.conn.execute("SELECT * FROM jobs WHERE status = 'failed' ORDER BY id"))
+
     def fetch_all_rows(self) -> list[sqlite3.Row]:
         return list(self.conn.execute("SELECT * FROM jobs ORDER BY id"))
 

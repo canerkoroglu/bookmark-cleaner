@@ -96,6 +96,81 @@ async def run_browser_workers(
     await asyncio.gather(*tasks)
 
 
+async def run_failed_url_recheck(
+    *,
+    queue: JobQueue,
+    browser: BrowserValidator,
+    concurrency: int,
+    db_lock: asyncio.Lock,
+    stop_event: asyncio.Event,
+    csv_exporter = None,
+) -> tuple[int, int]:
+    """Recheck failed URLs and return (total_rechecked, newly_fixed)."""
+    async with db_lock:
+        failed_rows = queue.fetch_failed_rows()
+    
+    if not failed_rows:
+        LOGGER.info("Recheck: no failed URLs to retry")
+        return 0, 0
+
+    total_failed = len(failed_rows)
+    LOGGER.info("Recheck: rechecking %s failed URL(s)", total_failed)
+    
+    # Put failed jobs in a queue
+    work_queue: asyncio.Queue = asyncio.Queue()
+    for row in failed_rows:
+        work_queue.put_nowait(row)
+    
+    newly_fixed = 0
+    newly_fixed_lock = asyncio.Lock()
+    
+    async def worker(worker_id: int) -> None:
+        nonlocal newly_fixed
+        while not stop_event.is_set():
+            try:
+                row = work_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            
+            job_id = int(row["id"])
+            url = str(row["url"])
+            progress_str = f"{job_id}/{total_failed}"
+            LOGGER.info("recheck_worker=%s processing %s url=%s", worker_id, progress_str, url)
+            
+            result = await browser.validate(url)
+            
+            if result.ok:
+                async with db_lock:
+                    queue.mark_done(
+                        job_id,
+                        http_status=result.http_status,
+                        title=result.title,
+                        description=result.description,
+                        keywords=result.keywords,
+                    )
+                async with newly_fixed_lock:
+                    newly_fixed += 1
+                LOGGER.info("recheck_worker=%s FIXED job_id=%s", worker_id, job_id)
+                if csv_exporter is not None:
+                    await csv_exporter.append_row(
+                        site_url=url,
+                        status="done",
+                        title=result.title,
+                        description=result.description,
+                        keywords=result.keywords,
+                        comments="",
+                    )
+            else:
+                LOGGER.debug("recheck_worker=%s still failed job_id=%s error=%s", worker_id, job_id, result.error)
+            
+            work_queue.task_done()
+    
+    tasks = [asyncio.create_task(worker(i + 1)) for i in range(max(1, concurrency))]
+    await asyncio.gather(*tasks)
+    
+    return total_failed, newly_fixed
+
+
 async def run_ai_support(
     *,
     queue: JobQueue,

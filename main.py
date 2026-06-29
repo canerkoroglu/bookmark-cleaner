@@ -161,7 +161,7 @@ async def async_main() -> int:
         try:
             from ai import GeminiClient
             from browser import BrowserValidator
-            from worker import run_ai_support, run_browser_workers
+            from worker import run_ai_support, run_browser_workers, run_failed_url_recheck
         except ImportError as exc:
             raise RuntimeError(
                 "Missing runtime dependency. Run: pip install -r requirements.txt && playwright install"
@@ -230,7 +230,7 @@ async def async_main() -> int:
             # Create incremental CSV snapshot writer so rows are appended as jobs finish.
             csv_exporter = CsvIncrementalExporter(args.output)
 
-            LOGGER.info("Phase 1/2: deterministic browser/status/metadata checks")
+            LOGGER.info("Phase 1/3: deterministic browser/status/metadata checks")
             async with BrowserValidator(
                 timeout_ms=args.timeout_ms,
                 retry_attempts=args.retry_limit,
@@ -253,8 +253,39 @@ async def async_main() -> int:
             export_jobs_to_csv(queue, args.output)
             LOGGER.info("Exported deterministic CSV to %s", args.output)
 
+            # Recheck failed URLs
+            if not stop_event.is_set():
+                LOGGER.info("Phase 1.5/3: rechecking failed URLs")
+                async with BrowserValidator(
+                    timeout_ms=args.timeout_ms,
+                    retry_attempts=args.retry_limit,
+                    retry_backoff_seconds=args.retry_backoff_seconds,
+                    domain_min_interval_seconds=args.domain_min_interval_seconds,
+                ) as browser:
+                    total_failed, newly_fixed = await run_failed_url_recheck(
+                        queue=queue,
+                        browser=browser,
+                        concurrency=args.concurrency,
+                        db_lock=db_lock,
+                        stop_event=stop_event,
+                        csv_exporter=csv_exporter,
+                    )
+                
+                # Log recheck summary
+                still_failed = total_failed - newly_fixed
+                LOGGER.info(
+                    "Recheck complete: %s url rechecking... %s not reachable but %s url has been corrected",
+                    total_failed,
+                    still_failed,
+                    newly_fixed,
+                )
+
+                # Update CSV with newly fixed URLs
+                export_jobs_to_csv(queue, args.output)
+                LOGGER.info("Updated CSV after recheck: %s", args.output)
+
         if not args.skip_ai and not stop_event.is_set():
-            LOGGER.info("Phase 2/2: AI comments support")
+            LOGGER.info("Phase 2/3: AI comments support")
             await run_ai_support(
                 queue=queue,
                 ai_client=ai_client,
