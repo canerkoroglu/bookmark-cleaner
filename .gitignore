@@ -49,6 +49,9 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+.python-version
 
 # Output directories (optional - adjust based on your needs)
 output/
+input/
+*.sqlite3
