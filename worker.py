@@ -21,6 +21,7 @@ async def run_browser_workers(
     db_lock: asyncio.Lock,
     stop_event: asyncio.Event,
     csv_exporter = None,
+    total_urls: int | None = None,
 ) -> None:
     processed_this_run = 0
     processed_lock = asyncio.Lock()
@@ -44,7 +45,8 @@ async def run_browser_workers(
             if job is None:
                 return
 
-            LOGGER.info("worker=%s processing job_id=%s url=%s", worker_id, job.id, job.url)
+            progress_str = f"{job.id}/{total_urls}" if total_urls else f"{job.id}"
+            LOGGER.info("worker=%s processing %s job_id=%s url=%s", worker_id, progress_str, job.id, job.url)
             result = await browser.validate(job.url)
 
             if result.ok:

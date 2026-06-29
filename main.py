@@ -246,6 +246,7 @@ async def async_main() -> int:
                     db_lock=db_lock,
                     stop_event=stop_event,
                     csv_exporter=csv_exporter,
+                    total_urls=len(urls),
                 )
 
             # Final deterministic snapshot (overwrite) to ensure canonical CSV before AI phase
